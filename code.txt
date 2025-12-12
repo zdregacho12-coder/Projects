@@ -1,0 +1,134 @@
+// Include Required Libraries
+#include <WiFi.h>
+#include <ESPAsyncWebServer.h>
+#include <ESP32Servo.h>
+#include <NTPClient.h>
+#include <WiFiUdp.h>
+
+// Wi-Fi Credentials
+#define WIFI_SSID "HUAWEI-2.4G-N6Fz"
+#define WIFI_PASSWORD "YYhjW44n"
+
+// Define Pins
+#define TRIG_PIN 5
+#define ECHO_PIN 18
+#define SERVO_PIN 23
+
+// Initialize Components
+Servo servo;
+AsyncWebServer server(80);
+WiFiUDP ntpUDP;
+NTPClient timeClient(ntpUDP, "asia.pool.ntp.org", 28800, 60000);
+
+// Variables
+String openTime = "07:00"; // Default opening time
+bool lidOpenedToday = false;
+
+// Function Prototypes
+void openLid();
+void closeLid();
+int getFeedLevel();
+void checkTime();
+
+void setup() {
+    Serial.begin(115200);
+    
+    // Connect to Wi-Fi
+    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+    while (WiFi.status() != WL_CONNECTED) {
+        delay(1000);
+        Serial.println("Connecting to Wi-Fi...");
+    }
+    Serial.println("Connected to Wi-Fi");
+    Serial.print("ESP32 IP Address: ");
+    Serial.println(WiFi.localIP());
+    
+    // Initialize Servo
+    servo.attach(SERVO_PIN);
+    closeLid(); // Ensure lid is closed at startup
+    
+    // Initialize Ultrasonic Sensor
+    pinMode(TRIG_PIN, OUTPUT);
+    pinMode(ECHO_PIN, INPUT);
+    
+    // Start NTP Client
+    timeClient.begin();
+    
+    // Serve Web Page
+    server.on("/", HTTP_GET, [](AsyncWebServerRequest *request){
+        String html = "<html><head><meta http-equiv='refresh' content='10'><style>body { text-align: center; font-family: Arial; }</style></head>";
+        html += "<body><h1>Feed Monitor</h1>";
+        html += "<p>Feed Level: " + String(getFeedLevel()) + "%</p>";
+        html += "<p>Current Time: " + timeClient.getFormattedTime() + "</p>";
+        html += "<p>Scheduled Open Time: " + openTime + "</p>";
+        html += "<form action='/setTime' method='GET'><label>Set Open Time (HH:MM): </label><input type='text' name='time'><input type='submit' value='Set'></form>";
+        html += "<button onclick=\"fetch('/open')\">Open Lid</button>";
+        html += "<button onclick=\"fetch('/close')\">Close Lid</button>";
+        html += "</body></html>";
+        request->send(200, "text/html", html);
+    });
+    
+    // Handle Open Lid Request
+    server.on("/open", HTTP_GET, [](AsyncWebServerRequest *request){
+        openLid();
+        request->send(200, "text/plain", "Lid Opened");
+    });
+    
+    // Handle Close Lid Request
+    server.on("/close", HTTP_GET, [](AsyncWebServerRequest *request){
+        closeLid();
+        request->send(200, "text/plain", "Lid Closed");
+    });
+    
+    // Handle Set Time Request
+    server.on("/setTime", HTTP_GET, [](AsyncWebServerRequest *request){
+        if (request->hasParam("time")) {
+            openTime = request->getParam("time")->value();
+            lidOpenedToday = false; // Reset daily flag
+        }
+        request->send(200, "text/plain", "Open time set to " + openTime);
+    });
+    
+    server.begin();
+}
+
+void loop() {
+    timeClient.update();
+    checkTime();
+    delay(60000); // Check every minute
+}
+
+void openLid() {
+    servo.write(90);
+    delay(1000);
+}
+
+void closeLid() {
+    servo.write(0);
+    delay(1000);
+}
+
+int getFeedLevel() {
+    digitalWrite(TRIG_PIN, LOW);
+    delayMicroseconds(2);
+    digitalWrite(TRIG_PIN, HIGH);
+    delayMicroseconds(10);
+    digitalWrite(TRIG_PIN, LOW);
+    
+    long duration = pulseIn(ECHO_PIN, HIGH);
+    int distance = duration * 0.034 / 2;
+    return constrain(map(distance, 0, 30, 100, 0), 0, 100);
+}
+
+void checkTime() {
+    String currentTime = timeClient.getFormattedTime().substring(0, 5); // Get HH:MM format
+    if (currentTime == openTime && !lidOpenedToday) {
+        openLid();
+         delay(5000);
+        closeLid();
+        lidOpenedToday = true; // Prevent multiple openings in a day
+    }
+    if (currentTime == "00:00") {
+        lidOpenedToday = false; // Reset daily at midnight
+    }
+}
