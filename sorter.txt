@@ -1,0 +1,94 @@
+#include <ESP32Servo.h>
+
+// TCS3200 Color Sensor Pins
+#define S0  26
+#define S1  25
+#define S2  33
+#define S3  32
+#define OUT 34
+
+// Servo Pins
+#define ROTATE_SERVO_PIN 18
+#define PUSH_SERVO_PIN   19
+
+Servo rotateServo;
+Servo pushServo;
+
+String lastColor = "";
+
+void setup() {
+  Serial.begin(115200);
+
+  // Setup TCS3200
+  pinMode(S0, OUTPUT);
+  pinMode(S1, OUTPUT);
+  pinMode(S2, OUTPUT);
+  pinMode(S3, OUTPUT);
+  pinMode(OUT, INPUT);
+
+  digitalWrite(S0, HIGH);
+  digitalWrite(S1, LOW); // 20% scaling
+
+  rotateServo.attach(ROTATE_SERVO_PIN);
+  pushServo.attach(PUSH_SERVO_PIN);
+
+  rotateServo.write(90); // Neutral start position
+  pushServo.write(90);
+}
+
+void loop() {
+  String detectedColor = readColor();
+
+  if (detectedColor != lastColor) {
+    Serial.print("Detected Color: ");
+    Serial.println(detectedColor);
+
+    rotateToColor(detectedColor);
+    delay(800);
+    pushObject();
+
+    lastColor = detectedColor;
+  }
+
+  delay(300);
+}
+
+String readColor() {
+  int red, green, blue;
+
+  digitalWrite(S2, LOW); digitalWrite(S3, LOW);
+  red = pulseIn(OUT, LOW);
+
+  digitalWrite(S2, HIGH); digitalWrite(S3, HIGH);
+  green = pulseIn(OUT, LOW);
+
+  digitalWrite(S2, LOW); digitalWrite(S3, HIGH);
+  blue = pulseIn(OUT, LOW);
+
+  Serial.print("R: "); Serial.print(red);
+  Serial.print(" G: "); Serial.print(green);
+  Serial.print(" B: "); Serial.println(blue);
+
+  if (red < green && red < blue) return "Red";
+  else if (green < red && green < blue) return "Green";
+  else return "Blue";
+}
+
+void rotateToColor(String color) {
+  if (color == "Red") {
+    rotateServo.write(35);  // Adjust angle for Red slide
+    delay(400);
+  } else if (color == "Green") {
+    rotateServo.write(100);  // Adjust angle for Green slide
+    delay(400);
+  } else if (color == "Blue") {
+    rotateServo.write(150); // Adjust angle for Blue slide
+    delay(400);
+  }
+}
+
+void pushObject() {
+  pushServo.write(90); // Push
+  delay(400);
+  pushServo.write(45); // Return to center
+}
